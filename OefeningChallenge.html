@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+    <title>Three.js Fundamentals</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+
+      #c {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+    </style>
+  </head>
+
+  <body>
+    <canvas id="c"></canvas>
+    <script type="module">
+      import * as THREE from "https://cdnjs.cloudflare.com/ajax/libs/three.js/r120/three.module.js";
+
+      function main() {
+        const canvas = document.querySelector("#c");
+        var gl =
+          canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+        gl.getExtension("OES_standard_derivatives");
+        const renderer = new THREE.WebGLRenderer({ canvas });
+
+        //instellen van mouse events
+        const mouseEvent = { x: 0, y: 0 };
+
+        //instellen van de camera
+        const fov = 75;
+        const aspect = 2; // the canvas default
+        const near = 0.1;
+        const far = 70;
+        const camera = new THREE.PerspectiveCamera(fov, aspect, near, far);
+        camera.position.z = 40;
+
+        //aanmaken van scene
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color("black");
+
+        //aanmaken van de Dodecahedron
+        const radius = 14;
+        const geometry = new THREE.DodecahedronBufferGeometry(radius);
+
+        const fragmentShader = `
+        #ifdef GL_ES
+          precision mediump float;
+         #endif
+
+        #extension GL_OES_standard_derivatives : enable
+
+        uniform float iTime;
+        uniform vec2 iMouse;
+        uniform vec2 iResolution;
+        varying vec2 vUv;
+
+        vec3 rgb2hsv(vec3 c)
+        {
+            vec4 K = vec4(0.0, -3.0 / 3.0, 20.0 / 3.0, -1.0);
+            vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+            vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+
+            float d = q.x - min(q.w, q.y);
+            float e = 1.0e-10;
+            return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+        }
+
+
+
+        void main( void ) {
+
+        	vec2 p = (2.0 * vUv.xy - iResolution) / min(iResolution.x, iResolution.y);
+
+        	float len = 1.0 - 0.0 / length(p);
+
+        	float d = distance(vec2( p.x * 0.5 + cos(p.y * 5.0 + iTime), p.y ), vec2(p.y, p.x) ) * 1.0;
+
+        	float add = cos((len + d - iTime) - iMouse.y);
+
+        	vec3 dest = 1.0 - vec3(1.0 * sin((add + iTime) + iMouse.x), 0.4 * cos(p.x - add), 0.4 * sin(p.y - add * 1.0) );
+
+        	vec3 col = rgb2hsv(dest);
+
+        	gl_FragColor = vec4(dest, 1.0);
+
+        }
+        `;
+
+        const vertexShader = `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+        } `;
+
+        const uniforms = {
+          iTime: { value: 0 },
+          iResolution: { value: new THREE.Vector2(1, 1) },
+          iMouse: {
+            value: new THREE.Vector2(mouseEvent.x, mouseEvent.y),
+          },
+        };
+
+        const material = new THREE.ShaderMaterial({
+          vertexShader,
+          fragmentShader,
+          uniforms,
+          side: THREE.DoubleSide,
+        });
+
+        function makeInstance(geometry, x) {
+          const shape = new THREE.Mesh(geometry, material);
+          scene.add(shape);
+          shape.position.x = x;
+          return shape;
+        }
+
+        canvas.addEventListener("mousemove", (e) => {
+          mouseEvent.x = e.layerX;
+          mouseEvent.y = e.layerY;
+        });
+
+        const shapes = [makeInstance(geometry, 0)];
+
+        //responsive maken
+        function resizeRendererToDisplaySize(renderer) {
+          const canvas = renderer.domElement;
+          const width = canvas.clientWidth;
+          const height = canvas.clientHeight;
+          const needResize = canvas.width !== width || canvas.height !== height;
+          if (needResize) {
+            renderer.setSize(width, height, false);
+          }
+          return needResize;
+        }
+
+        //renderen
+        function render(time) {
+          time *= 0.001; // convert to seconds
+
+          uniforms.iMouse.value.set(
+            map_range(mouseEvent.x, 0, window.innerWidth, 0, 1),
+            map_range(mouseEvent.y, 0, window.innerHeight, 0, 1)
+          );
+
+          if (resizeRendererToDisplaySize(renderer)) {
+            const canvas = renderer.domElement;
+            camera.aspect = canvas.clientWidth / canvas.clientHeight;
+            camera.updateProjectionMatrix();
+          }
+
+          // shape laten draaien
+          shapes.forEach((shape, ndx) => {
+            const speed = 1 + ndx * 0.1;
+            const rot = (time / 10) * speed;
+            shape.rotation.x =
+              rot + map_range(mouseEvent.y, 0, window.innerHeight, -1, 1);
+            shape.rotation.y =
+              rot + map_range(mouseEvent.x, 0, window.innerWidth, -1, 1);
+          });
+
+          //shape je muis laten volgen
+          shapes.forEach((shape) => {
+            shape.position.x = map_range(
+              mouseEvent.x,
+              0,
+              window.innerWidth,
+              -10,
+              10
+            );
+            shape.position.y =
+              1 - map_range(mouseEvent.y, 0, window.innerHeight, -5, 5) * 2;
+          });
+
+          uniforms.iTime.value = time;
+
+          renderer.render(scene, camera);
+
+          requestAnimationFrame(render);
+        }
+
+        requestAnimationFrame(render);
+      }
+      //value om te mappen
+      const map_range = (value, low1, high1, low2, high2) => {
+        return low2 + ((high2 - low2) * (value - low1)) / (high1 - low1);
+      };
+
+      main();
+    </script>
+  </body>
+</html>
